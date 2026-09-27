@@ -1,16 +1,54 @@
-import { boolean, date, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { boolean, date, jsonb, numeric, pgTable, text, timestamp, uuid, unique } from 'drizzle-orm/pg-core'
 
 const timestamps = {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }
 
+export const users = pgTable('app_users', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  email: text('email').notNull(),
+  displayName: text('display_name').notNull(),
+  status: text('status').default('active').notNull(),
+  createdAt: timestamps.createdAt,
+  updatedAt: timestamps.updatedAt,
+}, (table) => ({
+  emailUnique: unique('app_users_email_unique').on(table.email),
+}))
+
+export const userCredentials = pgTable('app_user_credentials', {
+  userId: uuid('user_id').primaryKey(),
+  passwordHash: text('password_hash').notNull(),
+  passwordUpdatedAt: timestamp('password_updated_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamps.createdAt,
+  updatedAt: timestamps.updatedAt,
+})
+
+export const userSessions = pgTable('app_user_sessions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamps.createdAt,
+}, (table) => ({
+  tokenHashUnique: unique('app_user_sessions_token_hash_unique').on(table.tokenHash),
+}))
+
 export const workspaces = pgTable('app_workspaces', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull(),
+  legalStructure: text('legal_structure').default('other').notNull(),
+  industryType: text('industry_type').default('services').notNull(),
+  country: text('country'),
+  currency: text('currency').default('USD').notNull(),
+  createdByUserId: text('created_by_user_id'),
+  status: text('status').default('active').notNull(),
   ...timestamps,
-})
+}, (table) => ({
+  slugUnique: unique('app_workspaces_slug_unique').on(table.slug),
+}))
 
 export const memberships = pgTable('app_memberships', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -19,7 +57,41 @@ export const memberships = pgTable('app_memberships', {
   role: text('role').notNull(),
   status: text('status').default('active').notNull(),
   createdAt: timestamps.createdAt,
-})
+}, (table) => ({
+  workspaceUserUnique: unique('app_memberships_workspace_user_unique').on(table.workspaceId, table.userId),
+}))
+
+export const entityOwnerships = pgTable('app_entity_ownerships', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull(),
+  userId: text('user_id').notNull(),
+  ownershipPercent: numeric('ownership_percent', { precision: 7, scale: 4 }).default('0').notNull(),
+  profitSharePercent: numeric('profit_share_percent', { precision: 7, scale: 4 }).default('0').notNull(),
+  entityRole: text('entity_role').default('member').notNull(),
+  status: text('status').default('active').notNull(),
+  createdAt: timestamps.createdAt,
+  updatedAt: timestamps.updatedAt,
+}, (table) => ({
+  workspaceUserUnique: unique('app_entity_ownership_workspace_user_unique').on(table.workspaceId, table.userId),
+}))
+
+export const entityInvitations = pgTable('app_entity_invitations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull(),
+  invitedByUserId: text('invited_by_user_id').notNull(),
+  email: text('email').notNull(),
+  role: text('role').default('member').notNull(),
+  ownershipPercent: numeric('ownership_percent', { precision: 7, scale: 4 }).default('0').notNull(),
+  profitSharePercent: numeric('profit_share_percent', { precision: 7, scale: 4 }).default('0').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  status: text('status').default('pending').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  acceptedByUserId: text('accepted_by_user_id'),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  createdAt: timestamps.createdAt,
+}, (table) => ({
+  tokenUnique: unique('app_entity_invitations_token_unique').on(table.tokenHash),
+}))
 
 export const clients = pgTable('app_clients', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -63,6 +135,17 @@ export const projects = pgTable('app_projects', {
   metadata: jsonb('metadata').default({}).notNull(),
   ...timestamps,
 })
+
+export const projectAccess = pgTable('app_project_access', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull(),
+  projectId: uuid('project_id').notNull(),
+  userId: text('user_id').notNull(),
+  accessRole: text('access_role').notNull(),
+  createdAt: timestamps.createdAt,
+}, (table) => ({
+  projectUserUnique: unique('app_project_access_project_user_unique').on(table.projectId, table.userId),
+}))
 
 export const reminders = pgTable('app_reminders', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -117,4 +200,55 @@ export const auditLogs = pgTable('app_audit_logs', {
   createdAt: timestamps.createdAt,
 })
 
-export const appSchema = { workspaces, memberships, clients, employees, projects, reminders, notifications, salesLeads, salesActivities, attendanceRecords, auditLogs }
+
+// Personal finance is owned by the authenticated person, not by a company workspace.
+// This keeps personal cash, transactions, assets, and liabilities isolated from entity data.
+export const personalAccounts = pgTable('app_personal_accounts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  name: text('name').notNull(),
+  accountType: text('account_type').default('cash').notNull(),
+  currency: text('currency').default('USD').notNull(),
+  openingBalance: numeric('opening_balance', { precision: 14, scale: 2 }).default('0').notNull(),
+  status: text('status').default('active').notNull(),
+  ...timestamps,
+})
+
+export const personalTransactions = pgTable('app_personal_transactions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  accountId: uuid('account_id').notNull(),
+  transactionType: text('transaction_type').notNull(),
+  category: text('category'),
+  description: text('description'),
+  amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+  transactionDate: date('transaction_date').notNull(),
+  notes: text('notes'),
+  ...timestamps,
+})
+
+export const personalAssets = pgTable('app_personal_assets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  name: text('name').notNull(),
+  assetType: text('asset_type').notNull(),
+  currentValue: numeric('current_value', { precision: 14, scale: 2 }).default('0').notNull(),
+  currency: text('currency').default('USD').notNull(),
+  status: text('status').default('active').notNull(),
+  notes: text('notes'),
+  ...timestamps,
+})
+
+export const personalLiabilities = pgTable('app_personal_liabilities', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  name: text('name').notNull(),
+  liabilityType: text('liability_type').notNull(),
+  currentBalance: numeric('current_balance', { precision: 14, scale: 2 }).default('0').notNull(),
+  currency: text('currency').default('USD').notNull(),
+  status: text('status').default('active').notNull(),
+  notes: text('notes'),
+  ...timestamps,
+})
+
+export const appSchema = { users, userCredentials, userSessions, workspaces, memberships, entityOwnerships, entityInvitations, clients, employees, projects, projectAccess, reminders, notifications, salesLeads, salesActivities, attendanceRecords, auditLogs, personalAccounts, personalTransactions, personalAssets, personalLiabilities }
